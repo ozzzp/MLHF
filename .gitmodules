@@ -1,0 +1,6 @@
+[submodule "models"]
+	path = models
+	url = git@github.com:ozzzp/models.git
+[submodule "RL_farmwork/dqn-prioritized-experience-replay"]
+	path = RL_farmwork/dqn-prioritized-experience-replay
+	url = git@github.com:ozzzp/dqn-prioritized-experience-replay.git
