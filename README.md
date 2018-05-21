@@ -87,9 +87,9 @@ Or, another choice is to modify and run scripts in `./scripts`
 
 ## extend to new model
 
-The MLHF is a general optimizer, but we have impliment the minimal operators's difference forward and loss of experiment, this might be the main task that extend to new model. This part of code can be view in `CustomOp/op_r_forward.py` and `CustomOp/hession_loss.py`. also, To register new operator's type to RNN, view `CustomOp/rnn.py`.
+The MLHF is a general optimizer, but we have impliment the minimal operators' difference forward and losses of experiment, this might be the main task that extend to new model. This part of code can be view in `CustomOp/op_r_forward.py` and `CustomOp/hession_loss.py`. Also, To register new operator's type to RNN, view `CustomOp/rnn.py`.
 
 ## dicussion and feedback
 
-Any discusstion, feedback or bugs report about MLHF are welcome. But it's not very recommend to contribute the application or extenction of MLHF (e.g. extend to new dataset, new model, more ops) to this repository, consider it's still a experiment project and might not be merged in time. _If you do such things or want to do, just fork this repository, and modify as your managed._   
+Any discusstion, feedback or bugs report about MLHF are welcome. But it's not very recommend to contribute the application or extenstion of MLHF (e.g. extend to new dataset, new model, more ops) to this repository, consider it's still a experiment project and might not be merged in time. _If you do such things or want to do, just fork this repository, and modify as your managed._   
 
