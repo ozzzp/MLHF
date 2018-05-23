@@ -1,5 +1,5 @@
 # Meta Learning with Hessian Free Approach in Neural Nets Training
-This is a Tensorflow implementation of MLHF optimizer, a generic second-order  meta-optimizer, which includes:
+This is a Tensorflow implementation of MLHF optimizer (paper link [https://arxiv.org/abs/1805.08462](https://arxiv.org/abs/1805.08462)), a generic second-order  meta-optimizer, which includes:
 
 * souce code of MLHF built on 2 layer LSTM.
 * meta-traning code on cuda-convnet and resnet of cifar10.
