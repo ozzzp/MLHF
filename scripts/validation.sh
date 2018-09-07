@@ -13,17 +13,15 @@ mkdir -p ${logs_name}
 
 export CUDA_VISIBLE_DEVICES=0
 
-cond=("--optimizer=meta --lr=1 --batch_size=128 --meta_ckpt=./convnet_log/x_rnn_4"
-      "--optimizer=momentum --lr=1e-3 --batch_size=128"
-      "--optimizer=adam --lr=1e-3 --batch_size=128"
-      "--optimizer=RMSprop --lr=1e-3 --batch_size=128"
-      "--optimizer=kfac --lr=1e-1 --batch_size=512")
+cond=("--optimizer=meta     --lr=2e-0 --batch_size=128 --meta_ckpt=./convnet_log/x_rnn_4"
+      "--optimizer=momentum --lr=1e-3 --batch_size=128 --momentum=0.9"
+      "--optimizer=adam     --lr=1e-3 --batch_size=128 --beta1=0.9 --beta2=0.999"
+      "--optimizer=RMSprop  --lr=1e-3 --batch_size=128 --decay=0.99")
 
 name=("x_rnn_4"
-      "momentum_3"
-      "adam_3"
-      "RMSprop_3"
-      "kfac_1")
+      "momentum"
+      "adam"
+      "RMSprop")
 
 for ((i = 0; i < ${#cond[@]}; i++))
 do

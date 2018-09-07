@@ -56,7 +56,7 @@ do
         --data_format=channels_last \
         --problem=resnet \
         --optimizer=meta \
-        --lr=1 \
+        --lr=0.5 \
         --meta_ckpt=${log_name} \
         ${cond[$i]} \
         2>&1 | tee ${val_log_name}'/logs.txt' &

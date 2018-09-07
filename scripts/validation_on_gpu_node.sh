@@ -11,14 +11,14 @@ echo ${PYTHONPATH}
 logs_name='./image_net_val'
 mkdir -p ${logs_name}
 
-cond=("--optimizer=momentum --lr=0.025 --batch_size=64"
-      "--optimizer=RMSprop --lr=0.0025 --batch_size=64"
-      "--optimizer=adam --lr=0.0025 --batch_size=64"
-      "--optimizer=SGD --lr=0.025 --batch_size=64")
+cond=("--optimizer=meta     --batch_size=64  --lr=5e-1    --meta_ckpt=./convnet_log/x_rnn_4"
+      "--optimizer=momentum --batch_size=64  --lr=0.025   --momentum=0.9"
+      "--optimizer=RMSprop  --batch_size=64  --lr=0.00025 --decay=0.99"
+      "--optimizer=adam     --batch_size=64  --lr=0.00025 --beta1=0.9 --beta2=0.999")
 
-name=("momentum" "RMSprop" "adam" "SGD")
+name=("x_rnn_4", "momentum" "RMSprop" "adam")
 
-cuda_devices=("0" "1" "2" "3")
+cuda_devices=("0" "1" "2")
 
 for ((i = 0; i < ${#cond[@]}; i++))
 do
