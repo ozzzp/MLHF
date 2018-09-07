@@ -8,10 +8,10 @@ addition_path=${base_path}'/RL_farmwork/dqn-prioritized-experience-replay'
 export PYTHONPATH=${base_path}':'${addition_path}
 echo ${PYTHONPATH}
 
-logs_name='./image_net_val'
+logs_name='./imagenet_val'
 mkdir -p ${logs_name}
 
-cond=("--optimizer=meta     --batch_size=64  --lr=5e-1    --meta_ckpt=./convnet_log/x_rnn_4"
+cond=("--optimizer=meta     --batch_size=64  --lr=5e-1    --meta_ckpt=./resnet_log/x_rnn_4"
       "--optimizer=momentum --batch_size=64  --lr=0.025   --momentum=0.9"
       "--optimizer=RMSprop  --batch_size=64  --lr=0.00025 --decay=0.99"
       "--optimizer=adam     --batch_size=64  --lr=0.00025 --beta1=0.9 --beta2=0.999")

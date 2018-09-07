@@ -8,8 +8,8 @@ addition_path=${base_path}'/RL_farmwork/dqn-prioritized-experience-replay'
 export PYTHONPATH=${base_path}':'${addition_path}
 echo ${PYTHONPATH}
 
-logs_name='./log11'
-val_logs_name='./image_net_val'
+logs_name='./resnet_log'
+val_logs_name='./resnet_val'
 
 mkdir -p ${logs_name}
 mkdir -p ${val_logs_name}

@@ -8,7 +8,7 @@ addition_path=${base_path}'/RL_farmwork/dqn-prioritized-experience-replay'
 export PYTHONPATH=${base_path}':'${addition_path}
 echo ${PYTHONPATH}
 
-logs_name='./convnet_val3'
+logs_name='./cifar10_val'
 mkdir -p ${logs_name}
 
 export CUDA_VISIBLE_DEVICES=0
