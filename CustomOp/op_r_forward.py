@@ -129,7 +129,7 @@ def enter_forward(op, r_input):
 
 def sigmoid_forward(op, r_input):
     with tf.name_scope('sigmoid_forward'):
-        return sigmoid_grad(op.outputs[0], r_input[0])
+        return [sigmoid_grad(op.outputs[0], r_input[0])]
 
 
 op_r_forward_funcs = {'Conv2D': conv2d_forward,

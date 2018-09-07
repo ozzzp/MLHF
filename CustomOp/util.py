@@ -273,14 +273,17 @@ def load_old_graph(sess, ckpt, varibles=None):
 
 def load_meta_parameters(sess, model_dir, scope='metaoptimizer'):
     ckpt = tf.train.get_checkpoint_state(model_dir)
-    if ckpt is not None:
-        varibles = tf.global_variables(scope=scope)
-        load_old_graph(sess, ckpt.model_checkpoint_path, varibles=varibles)
-        step = int(ckpt.model_checkpoint_path.rsplit('-', 1)[-1])
-        print('Restored from meta ckpt {}...'.format(step))
-        return step
+    varibles = tf.global_variables(scope=scope)
+    if len(varibles) > 0:
+        if ckpt is not None:
+            load_old_graph(sess, ckpt.model_checkpoint_path, varibles=varibles)
+            step = int(ckpt.model_checkpoint_path.rsplit('-', 1)[-1])
+            print('Restored from meta ckpt {}...'.format(step))
+            return step
+        else:
+            return None
     else:
-        return None
+        return True
 
 
 class MetaParametersLoadingHook(session_run_hook.SessionRunHook):

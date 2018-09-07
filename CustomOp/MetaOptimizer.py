@@ -16,12 +16,16 @@ from .rnn import RNN_optimizers, slot_name, _EPSILON
 
 class MetaHessionFreeOptimizer(tf.train.GradientDescentOptimizer):
     def __init__(self, learning_rate, optimizers=RNN_optimizers, is_training=False, use_locking=False,
-                 name="MetaHessionFree", iter=5, damping=2e-5, print_log=False, **kwargs):
+                 name="MetaHessionFree", iter=5, damping=2e-5, damping_type='regular', decay=2 / 3, print_log=False,
+                 **kwargs):
         self._optimizers = optimizers(**kwargs)
         self._is_training = is_training
         self._n = iter
         self._print_log = print_log
         self._damping = damping
+        self._decay = decay
+        assert damping_type in ['regular', 'LM_heuristics']
+        self._damping_type = damping_type
         super(MetaHessionFreeOptimizer, self).__init__(learning_rate=learning_rate,
                                                        use_locking=use_locking,
                                                        name=name)
@@ -58,12 +62,12 @@ class MetaHessionFreeOptimizer(tf.train.GradientDescentOptimizer):
             assert out in r_dict
             return r_dict[out]
 
-    def _generate_Hv_fun(self, var_list, out, input_list, Hl_func, ds=None):
+    def _generate_Hv_fun(self, var_list, out, input_list, Hl_func, ds=None, damping=0):
         def shape_func(op):
             return [var.get_shape() for var in var_list]
 
         if ds is not None:
-            dampings = [self._generate_d(d, var=v) + self._damping for d, v in zip(ds, var_list)]
+            dampings = [self._generate_d(d, var=v) + damping for d, v in zip(ds, var_list)]
         else:
             dampings = None
 
@@ -190,11 +194,13 @@ class MetaHessionFreeOptimizer(tf.train.GradientDescentOptimizer):
 
     def set_slot_shadow(self, var, val, slot_name, replace=False):
         named_slots = self._slot_dict(slot_name + '_shadow')
-        if not replace:
-            assert _var_key(var) not in named_slots
+        key = var if isinstance(var, str) else _var_key(var)
+
         if replace:
-            assert _var_key(var) in named_slots
-        named_slots[_var_key(var)] = val
+            assert key in named_slots
+        else:
+            assert key not in named_slots
+        named_slots[key] = val
 
     def _apply_state(self, var):
         ops = []
@@ -239,7 +245,7 @@ class MetaHessionFreeOptimizer(tf.train.GradientDescentOptimizer):
     def _resource_apply_sparse_duplicate_indices(self, grad, handle, indices):
         raise NotImplementedError
 
-    def minimize(self, loss_type, out, label, input_list, global_step=None, var_list=None):
+    def minimize(self, loss_type, out, label, input_list, global_step=None, var_list=None, network_fn=None):
         assert loss_type in loss_types
         loss_fn, Hl_fun = loss_types[loss_type]
 
@@ -251,7 +257,34 @@ class MetaHessionFreeOptimizer(tf.train.GradientDescentOptimizer):
         d_and_v = self._compute_gradients(loss, var_list=var_list)
         print('2nd backward done')
 
-        ds = [tf.stop_gradient(d + self._damping * v) for d, v in d_and_v if d is not None]
+        if self._damping_type == 'LM_heuristics':
+            assert callable(network_fn)
+            self._last_loss = tf.get_variable('last_loss', initializer=tf.zeros_initializer, shape=[], dtype=tf.float32)
+            self._q_difference = tf.get_variable('q_difference', initializer=tf.zeros_initializer, shape=[],
+                                                 dtype=tf.float32)
+            self._last_inputs = [
+                tf.get_variable('last_input_{}'.format(i), initializer=tf.zeros_initializer, shape=input.shape,
+                                dtype=input.dtype, trainable=False)
+                for i, input in enumerate(input_list)]
+            self._last_label = tf.get_variable('last_label', initializer=tf.zeros_initializer, shape=label.shape,
+                                               dtype=label.dtype, trainable=False)
+            self._damping = tf.get_variable('damping', initializer=self._damping, dtype=tf.float32,
+                                            trainable=False)
+
+            loss_on_last_batch = loss_fn(network_fn(*self._last_inputs), self._last_label)
+            rho = (
+                              loss_on_last_batch - self._last_loss) / self._q_difference  # tf.Print(self._q_difference, [self._q_difference, loss_on_last_batch, self._last_loss])
+            rho = tf.where(tf.equal(self._q_difference, 0), 0.5, rho)
+            # rho = tf.Print(rho, [rho], message='rho:')
+            decay = tf.train.piecewise_constant(rho, [0.25, 0.75], [1 / self._decay, 1., self._decay])
+            # decay = tf.Print(decay, [decay], message='decay:')
+            damping = self._damping * decay
+            damping = tf.clip_by_value(damping, 1e-3, 1)
+            # damping = tf.Print(damping, [damping], message='damping:')
+        else:
+            damping = self._damping
+
+        ds = [tf.stop_gradient(d) for d, _ in d_and_v if d is not None]
         if not ds:
             raise ValueError(
                 "No gradients provided for any variable, check your graph for ops"
@@ -259,7 +292,8 @@ class MetaHessionFreeOptimizer(tf.train.GradientDescentOptimizer):
                 ([str(v) for _, v in d_and_v], loss))
 
         var_list = [v for d, v in d_and_v if d is not None]
-        Hv_fun = self._generate_Hv_fun(ds=ds, var_list=var_list, out=out, input_list=input_list, Hl_func=Hl_fun)
+        Hv_fun = self._generate_Hv_fun(ds=ds, var_list=var_list, out=out, input_list=input_list, Hl_func=Hl_fun,
+                                       damping=damping)
 
         # generate x_0 from (d, r_1, x_1)
         x_is = [self._generate_x(d, var=v) for d, v in zip(ds, var_list)]
@@ -328,11 +362,15 @@ class MetaHessionFreeOptimizer(tf.train.GradientDescentOptimizer):
             self._generate_state_transform(r_i, x_i, var=var)
         print('rnn_sf generated')
 
-        if self._is_training:
-            H_xis = [d - r_i for d, r_i in zip(ds, r_is)]
+        inner_p_ds_x_is = self._inner_product(ds, x_is)
+        H_xis = [d - r_i for d, r_i in zip(ds, r_is)]
+        x_is_H_xis = self._inner_product(x_is, H_xis)
+        if self._damping_type == 'LM_heuristics':
+            q_difference = - self._learning_rate * inner_p_ds_x_is + self._learning_rate ** 2 / 2 * x_is_H_xis
 
-            inner_p_ds_x_is = self._inner_product(ds, x_is)
-            hession_loss = - inner_p_ds_x_is / tf.sqrt(self._inner_product(x_is, H_xis))
+        if self._is_training:
+
+            hession_loss = - inner_p_ds_x_is / tf.sqrt(x_is_H_xis)
             # minize r_1
             # assert there should be no grad which would backprop from x_1s to nn variable.
             r_loss = tf.global_norm(r_is)
@@ -355,6 +393,22 @@ class MetaHessionFreeOptimizer(tf.train.GradientDescentOptimizer):
                 next_state.append((v, tf.stop_gradient(v) - noise * self._learning_rate * x_i))
                 next_state.extend(self._apply_state(v))
             assert len(next_state) == len(tf.global_variables(scope='slots')) + len(tf.trainable_variables(scope='nn'))
+            if self._damping_type == 'LM_heuristics':
+                for val, var in zip(input_list, self._last_inputs):
+                    next_state.append((var, val))
+                next_state.append((self._damping, damping))
+                next_state.append((self._last_loss, loss))
+                next_state.append((self._last_label, label))
+                next_state.append((self._q_difference, q_difference))
             return next_state, loss, hession_loss, r_loss
         else:
-            return self._apply_gradients(list(zip(x_is, var_list)), global_step=global_step)
+            if self._damping_type == 'LM_heuristics':
+                depends = [tf.assign(var, val) for val, var in zip(input_list, self._last_inputs)]
+                depends.append(tf.assign(self._damping, damping))
+                depends.append(tf.assign(self._last_loss, loss))
+                depends.append(tf.assign(self._last_label, label))
+                depends.append(tf.assign(self._q_difference, q_difference))
+            else:
+                depends = []
+            with tf.control_dependencies(depends):
+                return self._apply_gradients(list(zip(x_is, var_list)), global_step=global_step)

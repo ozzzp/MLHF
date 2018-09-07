@@ -1,5 +1,5 @@
+import kfac
 import tensorflow as tf
-import tensorflow.contrib as tfcb
 
 from models.official.resnet.cifar10_main import _NUM_CLASSES
 from models.official.resnet.resnet_model import cifar10_resnet_v2_generator
@@ -8,7 +8,7 @@ from models.official.resnet.resnet_model import cifar10_resnet_v2_generator
 class kfac_layer_collection:
     def __init__(self):
         import unittest.mock as mock
-        self._layer_collection = tfcb.kfac.layer_collection.LayerCollection()
+        self._layer_collection = kfac.LayerCollection()
 
         def custom_apply(layer, inputs, *args, **kwargs):
             outs = layer.__call__(inputs, *args, **kwargs)
@@ -98,12 +98,22 @@ def convnet(input, *arg):
     return softmax_linear
 
 
+def mlp(input, *arg):
+    input = tf.layers.flatten(input)
+    init = tf.random_normal_initializer(mean=0, stddev=0.01)
+    out = tf.layers.dense(input, 20, activation=tf.nn.sigmoid, kernel_initializer=init, bias_initializer=init)
+    out = tf.layers.dense(out, 10, activation=None, kernel_initializer=init, bias_initializer=init)
+    return out
+
+
 def get_problem(params):
     if params['problem'] == 'resnet':
         network = cifar10_resnet_v2_generator(
             params['resnet_size'], _NUM_CLASSES, params['data_format'])
     elif params['problem'] == 'convnet':
         network = convnet
+    elif params['problem'] == 'MLP':
+        network = mlp
     else:
         raise ValueError('{} not found!'.format(params['problem']))
     return network

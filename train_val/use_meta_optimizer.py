@@ -1,8 +1,73 @@
+import kfac
+
 import CustomOp as co
 import RL_farmwork.experience_replay as rl
 from models.official.resnet.cifar10_main import *
-from models.official.resnet.cifar10_main import _WEIGHT_DECAY, _NUM_IMAGES, _MOMENTUM
+from models.official.resnet.cifar10_main import input_fn, _WEIGHT_DECAY, _NUM_IMAGES
 from train_val.problems import *
+
+
+def get_filenames(training_type, data_dir):
+    """Returns a list of filenames."""
+    data_dir = os.path.join(data_dir, 'cifar-10-batches-bin')
+
+    assert os.path.exists(data_dir), (
+        'Run cifar10_download_and_extract.py first to download and extract the '
+        'CIFAR-10 data.')
+
+    if training_type == 'meta_training':
+        return [
+            os.path.join(data_dir, 'data_batch_%d.bin' % i)
+            for i in range(1, 4)
+        ]
+    elif training_type == 'training':
+        return [
+            os.path.join(data_dir, 'data_batch_%d.bin' % i)
+            for i in range(4, 6)
+        ]
+    elif training_type == 'testing':
+        return [os.path.join(data_dir, 'test_batch.bin')]
+
+
+def input_fn(training_type, data_dir, batch_size, num_epochs=1):
+    """Input_fn using the tf.data input pipeline for CIFAR-10 dataset.
+
+    Args:
+      is_training: A boolean denoting whether the input is for training.
+      data_dir: The directory containing the input data.
+      batch_size: The number of samples per batch.
+      num_epochs: The number of epochs to repeat the dataset.
+
+    Returns:
+      A tuple of images and labels.
+    """
+    dataset = record_dataset(get_filenames(training_type, data_dir))
+
+    is_training = training_type != 'testing'
+
+    if is_training:
+        # When choosing shuffle buffer sizes, larger sizes result in better
+        # randomness, while smaller sizes have better performance. Because CIFAR-10
+        # is a relatively small dataset, we choose to shuffle the full epoch.
+        dataset = dataset.shuffle(buffer_size=_NUM_IMAGES['train'])
+
+    dataset = dataset.map(parse_record, num_parallel_calls=10)
+    dataset = dataset.map(
+        lambda image, label: (preprocess_image(image, is_training), label), num_parallel_calls=10)
+
+    dataset = dataset.prefetch(2 * batch_size)
+
+    # We call repeat after shuffling, rather than before, to prevent separate
+    # epochs from blending together.
+    dataset = dataset.repeat(num_epochs)
+
+    # Batch results by up to batch_size, and then fetch the tuple from the
+    # iterator.
+    dataset = dataset.apply(tf.contrib.data.batch_and_drop_remainder(batch_size))
+    iterator = dataset.make_one_shot_iterator()
+    images, labels = iterator.get_next()
+
+    return images, labels
 
 
 def cifar10_model_fn(features, labels, mode, params):
@@ -10,13 +75,18 @@ def cifar10_model_fn(features, labels, mode, params):
     tf.summary.image('images', features, max_outputs=6)
 
     inputs = features
-    network = get_problem(params)
-    with tf.variable_scope('nn', reuse=False):
-        if params['optimizer'] == 'kfac':
-            with kfac_layer_collection() as lc:
-                logits = network(inputs, mode == tf.estimator.ModeKeys.TRAIN)
-        else:
-            logits = network(inputs, mode == tf.estimator.ModeKeys.TRAIN)
+    _network = get_problem(params)
+
+    def network(*inputs):
+        with tf.variable_scope('nn', reuse=tf.AUTO_REUSE):
+            return _network(*inputs, mode == tf.estimator.ModeKeys.TRAIN)
+
+    logits = network(inputs)
+
+    if params['optimizer'] == 'kfac':
+        lc = kfac.LayerCollection()
+        lc.register_categorical_predictive_distribution(logits)
+        lc.auto_register_layers()
 
     predictions = {
         'classes': tf.argmax(logits, axis=1),
@@ -55,25 +125,46 @@ def cifar10_model_fn(features, labels, mode, params):
         # Create a tensor named learning_rate for logging purposes
         tf.identity(learning_rate, name='learning_rate')
         tf.summary.scalar('learning_rate', learning_rate)
-
         if params['optimizer'] == 'meta':
             optimizer = co.MetaHessionFreeOptimizer(learning_rate=learning_rate,
                                                     iter=params['CG_iter'],
                                                     x_use=params['x_use'],
-                                                    y_use=params['y_use'])
+                                                    y_use=params['y_use'],
+                                                    d_use=params['d_use'],
+                                                    damping_type=params['damping_type'],
+                                                    damping=params['damping'],
+                                                    decay=params['decay'])
         elif params['optimizer'] == 'adam':
-            optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
+            optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=params['beta1'],
+                                               beta2=params['beta2'])
         elif params['optimizer'] == 'RMSprop':
-            optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate)
+            optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate, decay=params['decay'])
         elif params['optimizer'] == 'momentum':
-            optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=_MOMENTUM)
+            optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=params['momentum'])
         elif params['optimizer'] == 'SGD':
             optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
         elif params['optimizer'] == 'kfac':
-            optimizer = tfcb.kfac.optimizer.KfacOptimizer(learning_rate=learning_rate,
-                                                          cov_ema_decay=0.9,
-                                                          damping=1e-3,
-                                                          layer_collection=lc.layer_collection)
+            optimizer = kfac.PeriodicInvCovUpdateKfacOpt(learning_rate=learning_rate,
+                                                         cov_ema_decay=params['decay'],
+                                                         damping=params['damping'],
+                                                         layer_collection=lc)
+
+            if params['damping_type'] == 'LM_heuristics':
+                last_inputs = tf.get_variable('last_input', initializer=tf.zeros_initializer, shape=inputs.shape,
+                                              dtype=inputs.dtype, trainable=False)
+
+                last_labels = tf.get_variable('last_label', initializer=tf.zeros_initializer, shape=labels.shape,
+                                              dtype=labels.dtype, trainable=False)
+
+                catched_collecctions = [tf.assign(last_inputs, inputs), tf.assign(last_labels, labels)]
+
+                optimizer.set_damping_adaptation_params(
+                    prev_train_batch=(last_inputs, last_labels),
+                    is_chief=True,
+                    loss_fn=lambda x: tf.losses.softmax_cross_entropy(logits=network(x[0]),
+                                                                      onehot_labels=x[1]),
+                    damping_adaptation_decay=params['momentum'],
+                )
         else:
             raise ValueError
 
@@ -86,15 +177,24 @@ def cifar10_model_fn(features, labels, mode, params):
                                               out=logits,
                                               label=labels,
                                               input_list=[inputs],
-                                              global_step=global_step)
+                                              global_step=global_step,
+                                              network_fn=network)
                 train_hooks = [co.MetaParametersLoadingHook(params['meta_ckpt'])]
             else:
                 train_op = optimizer.minimize(loss, global_step=global_step)
+                '''
                 train_hooks = [rl.RecordStateHook(state_scope='nn',
                                                   total_step=total_step,
                                                   account=100,
                                                   loss=cross_entropy,
                                                   experience=experience)]
+                '''
+
+                if params['optimizer'] == 'kfac' and params['damping_type'] == 'LM_heuristics':
+                    with tf.control_dependencies([train_op]):
+                        with tf.control_dependencies(catched_collecctions):
+                            train_op = tf.no_op()
+                train_hooks = []
     else:
         train_op = None
         train_hooks = []
@@ -144,7 +244,14 @@ def main(unused_argv):
             'CG_iter': FLAGS.CG_iter,
             'x_use': FLAGS.x_use,
             'y_use': FLAGS.y_use,
-            'problem': FLAGS.problem
+            'd_use': FLAGS.d_use,
+            'problem': FLAGS.problem,
+            'damping': FLAGS.damping,
+            'beta1': FLAGS.beta1,
+            'beta2': FLAGS.beta2,
+            'decay': FLAGS.decay,
+            'momentum': FLAGS.momentum,
+            'damping_type': FLAGS.damping_type
         })
 
     for _ in range(FLAGS.train_epochs // FLAGS.epochs_per_eval):
@@ -159,17 +266,32 @@ def main(unused_argv):
 
         cifar_classifier.train(
             input_fn=lambda: input_fn(
-                True, FLAGS.data_dir, FLAGS.batch_size, FLAGS.epochs_per_eval),
+                'training', FLAGS.data_dir, FLAGS.batch_size, FLAGS.epochs_per_eval),
             hooks=[logging_hook])
 
         # Evaluate the model and print results
         eval_results = cifar_classifier.evaluate(
-            input_fn=lambda: input_fn(False, FLAGS.data_dir, FLAGS.batch_size))
+            input_fn=lambda: input_fn('testing', FLAGS.data_dir, FLAGS.batch_size))
         print(eval_results)
 
 
+parser.add_argument('--momentum', type=float, default=0.9,
+                    help='')
+
+parser.add_argument('--beta1', type=float, default=0.9,
+                    help='')
+
+parser.add_argument('--beta2', type=float, default=0.999,
+                    help='')
+
+parser.add_argument('--decay', type=float, default=0.9,
+                    help='')
+
 parser.add_argument('--meta_ckpt', type=str, default='/tmp/cifar10_data',
                     help='The path to the metackpt_data')
+
+parser.add_argument('--damping_type', type=str, default='regular',
+                    help="['regular', 'LM_heuristics']")
 
 parser.add_argument('--lr', type=float, default=1,
                     help='init lr.')
@@ -188,6 +310,12 @@ parser.add_argument('--x_use', type=str, default='x',
 
 parser.add_argument('--y_use', type=str, default='rnn',
                     help="['rnn', 'none']")
+
+parser.add_argument('--d_use', type=str, default='rnn',
+                    help="['rnn', 'none']")
+
+parser.add_argument('--damping', type=float, default=2e-5,
+                    help="damping")
 
 if __name__ == '__main__':
     with rl.Manager() as manager:

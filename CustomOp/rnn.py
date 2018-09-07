@@ -83,7 +83,7 @@ def generate_rnn_state_transform():
     return _rnn
 
 
-def generate_x_y_sf(name, x_use='rnn', y_use='rnn'):
+def generate_x_y_sf(name, x_use='rnn', y_use='rnn', d_use='rnn'):
     assert x_use in ['rnn', 'x', 'd']
     if x_use == 'rnn':
         x = generate_rnn_optimizer(name, 'x', softplus=False, need_r1_and_x1=True)
@@ -102,7 +102,12 @@ def generate_x_y_sf(name, x_use='rnn', y_use='rnn'):
         def y(*args, optimizer=None, var=None):
             return tf.ones_like(args[0])
 
-    d = generate_rnn_optimizer(name, 'd', softplus=True, need_r1_and_x1=True)
+    assert d_use in ['rnn', 'none']
+    if d_use == 'rnn':
+        d = generate_rnn_optimizer(name, 'd', softplus=True, need_r1_and_x1=True)
+    else:
+        def d(*args, optimizer=None, var=None):
+            return tf.zeros_like(args[0])
 
     sf = generate_rnn_state_transform()
     return {'x': x, 'd': d, 'y': y, 'sf': sf}

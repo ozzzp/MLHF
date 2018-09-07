@@ -1,6 +1,6 @@
 import CustomOp as co
 from models.official.resnet.imagenet_main import *
-from models.official.resnet.imagenet_main import _WEIGHT_DECAY, _LABEL_CLASSES, _MOMENTUM
+from models.official.resnet.imagenet_main import _WEIGHT_DECAY, _LABEL_CLASSES
 from train_val.problems import *
 
 
@@ -54,15 +54,18 @@ def resnet_model_fn(features, labels, mode, params):
             optimizer = co.MetaHessionFreeOptimizer(learning_rate=learning_rate,
                                                     iter=params['CG_iter'],
                                                     x_use=params['x_use'],
-                                                    y_use=params['y_use'])
+                                                    y_use=params['y_use'],
+                                                    d_use=params['d_use'],
+                                                    damping=params['damping'])
         elif params['optimizer'] == 'adam':
-            optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
+            optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=params['beta1'],
+                                               beta2=params['beta2'])
         elif params['optimizer'] == 'RMSprop':
-            optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate)
+            optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate, decay=params['decay'])
         elif params['optimizer'] == 'SGD':
             optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
         elif params['optimizer'] == 'momentum':
-            optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=_MOMENTUM)
+            optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=params['momentum'])
         elif params['optimizer'] == 'kfac':
             optimizer = tfcb.kfac.optimizer.KfacOptimizer(learning_rate=1,
                                                           cov_ema_decay=0.9,
@@ -135,7 +138,13 @@ def main(unused_argv):
             'CG_iter': FLAGS.CG_iter,
             'x_use': FLAGS.x_use,
             'y_use': FLAGS.y_use,
-            'problem': FLAGS.problem
+            'd_use': FLAGS.d_use,
+            'damping': FLAGS.damping,
+            'problem': FLAGS.problem,
+            'beta1': FLAGS.beta1,
+            'beta2': FLAGS.beta2,
+            'decay': FLAGS.decay,
+            'momentum': FLAGS.momentum,
         })
 
     for _ in range(FLAGS.train_epochs // FLAGS.epochs_per_eval):
@@ -164,6 +173,18 @@ parser.add_argument('--meta_ckpt', type=str, default='/tmp/cifar10_data',
 parser.add_argument('--lr', type=float, default=1,
                     help='init lr.')
 
+parser.add_argument('--momentum', type=float, default=0.9,
+                    help='')
+
+parser.add_argument('--beta1', type=float, default=0.9,
+                    help='')
+
+parser.add_argument('--beta2', type=float, default=0.999,
+                    help='')
+
+parser.add_argument('--decay', type=float, default=0.9,
+                    help='')
+
 parser.add_argument('--optimizer', type=str, default='meta',
                     help='chosen of optimizer, ["meta", "SGD", "RMSprop", "adam", "kfac", "momentum"]')
 
@@ -178,6 +199,12 @@ parser.add_argument('--x_use', type=str, default='x',
 
 parser.add_argument('--y_use', type=str, default='rnn',
                     help="['rnn', 'none']")
+
+parser.add_argument('--d_use', type=str, default='rnn',
+                    help="['rnn', 'none']")
+
+parser.add_argument('--damping', type=float, default=2e-5,
+                    help="damping")
 
 if __name__ == '__main__':
     tf.logging.set_verbosity(tf.logging.INFO)

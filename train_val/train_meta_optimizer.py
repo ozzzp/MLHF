@@ -5,7 +5,29 @@ from models.official.resnet.cifar10_main import _NUM_IMAGES
 from train_val.problems import get_problem
 
 
-def input_fn(is_training, data_dir, batch_size, meta_roll_back, num_epochs=1):
+def get_filenames(training_type, data_dir):
+    """Returns a list of filenames."""
+    data_dir = os.path.join(data_dir, 'cifar-10-batches-bin')
+
+    assert os.path.exists(data_dir), (
+        'Run cifar10_download_and_extract.py first to download and extract the '
+        'CIFAR-10 data.')
+
+    if training_type == 'meta_training':
+        return [
+            os.path.join(data_dir, 'data_batch_%d.bin' % i)
+            for i in range(1, 4)
+        ]
+    elif training_type == 'training':
+        return [
+            os.path.join(data_dir, 'data_batch_%d.bin' % i)
+            for i in range(4, 6)
+        ]
+    elif training_type == 'testing':
+        return [os.path.join(data_dir, 'test_batch.bin')]
+
+
+def input_fn(training_type, data_dir, batch_size, meta_roll_back, num_epochs=1):
     """Input_fn using the tf.data input pipeline for CIFAR-10 dataset.
 
     Args:
@@ -17,7 +39,9 @@ def input_fn(is_training, data_dir, batch_size, meta_roll_back, num_epochs=1):
     Returns:
       A tuple of images and labels.
     """
-    dataset = record_dataset(get_filenames(is_training, data_dir))
+    dataset = record_dataset(get_filenames(training_type, data_dir))
+
+    is_training = training_type != 'testing'
 
     if is_training:
         # When choosing shuffle buffer sizes, larger sizes result in better
@@ -188,7 +212,7 @@ def main(unused_argv):
 
         cifar_classifier.train(
             input_fn=lambda: input_fn(
-                True, FLAGS.data_dir, FLAGS.batch_size, FLAGS.meta_roll_back, FLAGS.epochs_per_eval),
+                'meta_training', FLAGS.data_dir, FLAGS.batch_size, FLAGS.meta_roll_back, FLAGS.epochs_per_eval),
             hooks=[logging_hook])
 
 
@@ -197,7 +221,6 @@ parser.add_argument('--meta_roll_back', type=int, default=10,
 
 parser.add_argument('--keep_prob', type=float, default=0.5,
                     help='keep_prob of experience replay.')
-
 
 parser.add_argument('--problem', type=str, default='',
                     help='["resnet", "convnet"]')
